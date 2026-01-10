@@ -1,0 +1,100 @@
+name: Manual Article Generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Sujet de l\'article'
+        required: true
+        type: string
+      keywords:
+        description: 'Mots-clés (séparés par des virgules)'
+        required: false
+        type: string
+        default: ''
+      category:
+        description: 'Catégorie WordPress'
+        required: false
+        default: 'Blog'
+        type: string
+      status:
+        description: 'Statut de publication'
+        required: true
+        default: 'draft'
+        type: choice
+        options:
+          - draft
+          - publish
+          - pending
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    name: Generate article
+    steps:
+      - name: Generate article
+        id: generate
+        run: |
+          # Convertir les mots-clés en tableau JSON
+          IFS=',' read -ra KEYWORDS_ARRAY <<< "${{ inputs.keywords }}"
+          KEYWORDS_JSON=$(printf '%s\n' "${KEYWORDS_ARRAY[@]}" | jq -R . | jq -s .)
+
+          echo "📝 Génération d'article"
+          echo "Sujet: ${{ inputs.topic }}"
+          echo "Mots-clés: ${{ inputs.keywords }}"
+          echo "Catégorie: ${{ inputs.category }}"
+          echo "Statut: ${{ inputs.status }}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST ${{ secrets.WORKER_URL }}/generate-article \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"topic\": \"${{ inputs.topic }}\",
+              \"keywords\": $KEYWORDS_JSON,
+              \"category\": \"${{ inputs.category }}\",
+              \"status\": \"${{ inputs.status }}\"
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            ARTICLE_URL=$(echo $BODY | jq -r '.article.wordpressUrl // empty')
+            IMAGE_URL=$(echo $BODY | jq -r '.article.imageUrl // empty')
+
+            echo "✅ Article généré avec succès!"
+            echo "article_url=$ARTICLE_URL" >> $GITHUB_OUTPUT
+            echo "image_url=$IMAGE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Erreur lors de la génération: $BODY"
+            exit 1
+          fi
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "# 📝 Génération d'article" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Sujet**: ${{ inputs.topic }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Catégorie**: ${{ inputs.category }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Statut**: ${{ inputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "${{ steps.generate.outputs.article_url }}" ]; then
+            echo "## ✅ Succès" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 **Article WordPress**: [${{ steps.generate.outputs.article_url }}](${{ steps.generate.outputs.article_url }})" >> $GITHUB_STEP_SUMMARY
+            if [ -n "${{ steps.generate.outputs.image_url }}" ]; then
+              echo "🖼️ **Image générée**: [${{ steps.generate.outputs.image_url }}](${{ steps.generate.outputs.image_url }})" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "## ❌ Échec" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Consultez les logs pour plus de détails." >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ Généré le: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

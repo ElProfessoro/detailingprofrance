@@ -1,0 +1,27 @@
+{
+  "name": "detailingprofrance-blog-automation",
+  "version": "1.0.0",
+  "description": "Système automatique de génération d'articles de blog SEO avec Gemini et Cloudflare Workers",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test",
+    "preview": "wrangler preview"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "gemini",
+    "wordpress",
+    "seo",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.82.0"
+  },
+  "dependencies": {}
+}

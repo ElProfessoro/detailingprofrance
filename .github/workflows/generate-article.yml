@@ -1,0 +1,130 @@
+name: Generate Blog Article
+
+on:
+  schedule:
+    # Tous les lundis à 9h UTC (10h Paris hiver, 11h Paris été)
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Sujet de l\'article (optionnel, sinon utilise topics.json)'
+        required: false
+        type: string
+      keywords:
+        description: 'Mots-clés séparés par des virgules (optionnel)'
+        required: false
+        type: string
+      category:
+        description: 'Catégorie WordPress'
+        required: false
+        default: 'Blog'
+        type: string
+      status:
+        description: 'Statut de publication'
+        required: false
+        default: 'publish'
+        type: choice
+        options:
+          - draft
+          - publish
+          - pending
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    name: Generate and publish article
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Read topics from file
+        id: read-topics
+        run: |
+          if [ -f "topics.json" ]; then
+            TOPIC=$(jq -r '.[0].topic' topics.json)
+            KEYWORDS=$(jq -r '.[0].keywords | join(",")' topics.json)
+            CATEGORY=$(jq -r '.[0].category // "Blog"' topics.json)
+            STATUS=$(jq -r '.[0].status // "publish"' topics.json)
+            echo "topic=$TOPIC" >> $GITHUB_OUTPUT
+            echo "keywords=$KEYWORDS" >> $GITHUB_OUTPUT
+            echo "category=$CATEGORY" >> $GITHUB_OUTPUT
+            echo "status=$STATUS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate article via Worker
+        id: generate
+        run: |
+          TOPIC="${{ inputs.topic || steps.read-topics.outputs.topic }}"
+          KEYWORDS="${{ inputs.keywords || steps.read-topics.outputs.keywords }}"
+          CATEGORY="${{ inputs.category || steps.read-topics.outputs.category }}"
+          STATUS="${{ inputs.status || steps.read-topics.outputs.status }}"
+
+          if [ -z "$TOPIC" ]; then
+            echo "❌ Aucun sujet disponible dans topics.json ou fourni en entrée"
+            exit 1
+          fi
+
+          # Convertir les mots-clés en tableau JSON
+          IFS=',' read -ra KEYWORDS_ARRAY <<< "$KEYWORDS"
+          KEYWORDS_JSON=$(printf '%s\n' "${KEYWORDS_ARRAY[@]}" | jq -R . | jq -s .)
+
+          echo "📝 Génération d'article sur: $TOPIC"
+          echo "🏷️ Mots-clés: $KEYWORDS"
+          echo "📁 Catégorie: $CATEGORY"
+          echo "📊 Statut: $STATUS"
+
+          RESPONSE=$(curl -s -X POST ${{ secrets.WORKER_URL }}/generate-article \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"topic\": \"$TOPIC\",
+              \"keywords\": $KEYWORDS_JSON,
+              \"category\": \"$CATEGORY\",
+              \"status\": \"$STATUS\"
+            }")
+
+          echo "Response: $RESPONSE"
+
+          # Extraire l'URL de l'article
+          ARTICLE_URL=$(echo $RESPONSE | jq -r '.article.wordpressUrl // empty')
+
+          if [ -n "$ARTICLE_URL" ]; then
+            echo "✅ Article publié: $ARTICLE_URL"
+            echo "article_url=$ARTICLE_URL" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Erreur lors de la génération"
+            exit 1
+          fi
+
+      - name: Remove processed topic from topics.json
+        if: success() && !inputs.topic
+        run: |
+          if [ -f "topics.json" ]; then
+            # Supprimer le premier élément du tableau
+            jq 'del(.[0])' topics.json > topics.tmp.json
+            mv topics.tmp.json topics.json
+
+            # Commit et push si des changements
+            git config user.name "GitHub Actions Bot"
+            git config user.email "actions@github.com"
+            git add topics.json
+
+            if git diff --staged --quiet; then
+              echo "Aucun changement à committer"
+            else
+              git commit -m "🤖 Remove processed topic from queue"
+              git push
+            fi
+          fi
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## 📝 Génération d'article" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ steps.generate.outputs.article_url }}" ]; then
+            echo "✅ **Statut**: Succès" >> $GITHUB_STEP_SUMMARY
+            echo "🔗 **URL**: ${{ steps.generate.outputs.article_url }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Statut**: Échec" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ **Date**: $(date)" >> $GITHUB_STEP_SUMMARY

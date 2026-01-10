@@ -1,0 +1,50 @@
+name = "detailingprofrance-blog-automation"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Bindings pour Cloudflare AI Workers (génération d'images)
+[ai]
+binding = "AI"
+
+# SECRETS À CONFIGURER (NE PAS mettre dans ce fichier!)
+# Exécuter ces commandes pour configurer les secrets:
+#
+# wrangler secret put GEMINI_API_KEY
+# wrangler secret put GITHUB_TOKEN
+# wrangler secret put CLOUDINARY_API_SECRET
+# wrangler secret put WORDPRESS_APP_PASSWORD
+
+# Variables d'environnement publiques
+[vars]
+# GitHub
+GITHUB_REPO = "ElProfessoro/detailingprofrance"
+
+# Cloudinary
+CLOUDINARY_CLOUD_NAME = "ds9nq6m4r"
+CLOUDINARY_API_KEY = "382534719394644"
+CLOUDINARY_UPLOAD_PRESET = "nexus_articles"
+
+# WordPress - À PERSONNALISER
+WORDPRESS_URL = "https://votresite.com"
+WORDPRESS_USERNAME = "votre_username"
+
+# Cron Triggers - Automatisation de la génération d'articles
+# Format: "minute heure jour mois jour_semaine"
+# Tous les temps sont en UTC
+#
+# Exemples de planifications:
+# - "0 9 * * 1"      → Tous les lundis à 9h UTC
+# - "0 10 * * *"     → Tous les jours à 10h UTC
+# - "0 9 * * 1,3,5"  → Lundi, Mercredi, Vendredi à 9h UTC
+# - "0 */6 * * *"    → Toutes les 6 heures
+# - "0 8 * * 1-5"    → Du lundi au vendredi à 8h UTC
+#
+# Convertisseur de cron: https://crontab.guru/
+
+[triggers]
+crons = ["0 9 * * 1"]  # Par défaut: tous les lundis à 9h UTC
+
+# Limites et configuration
+# Cloudflare Workers: 100,000 requêtes/jour (gratuit)
+# CPU time: 10ms par requête (peut être augmenté)
+# Génération d'article: ~30-60 secondes
