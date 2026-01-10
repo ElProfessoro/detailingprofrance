@@ -3,21 +3,28 @@
  */
 
 export class WordPressService {
-  constructor(siteUrl, username, appPassword) {
+  constructor(siteUrl, username, appPassword, authType = 'basic') {
     this.siteUrl = siteUrl.replace(/\/$/, ''); // Supprime le slash final
     this.username = username;
     this.appPassword = appPassword;
     this.apiBase = `${this.siteUrl}/wp-json/wp/v2`;
+    this.authType = authType; // 'basic' ou 'bearer'
     this.authHeader = this.createAuthHeader();
   }
 
   /**
-   * Crée l'en-tête d'authentification Basic Auth
+   * Crée l'en-tête d'authentification (Basic Auth ou Bearer Token)
    * @returns {string}
    */
   createAuthHeader() {
-    const credentials = `${this.username}:${this.appPassword}`;
-    return `Basic ${btoa(credentials)}`;
+    if (this.authType === 'bearer') {
+      // Authentification par token (JWT, API Token, etc.)
+      return `Bearer ${this.appPassword}`;
+    } else {
+      // Authentification Basic Auth (par défaut)
+      const credentials = `${this.username}:${this.appPassword}`;
+      return `Basic ${btoa(credentials)}`;
+    }
   }
 
   /**

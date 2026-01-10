@@ -81,7 +81,8 @@ export default {
       const wordpress = new WordPressService(
         env.WORDPRESS_URL,
         env.WORDPRESS_USERNAME,
-        env.WORDPRESS_APP_PASSWORD
+        env.WORDPRESS_APP_PASSWORD,
+        env.WORDPRESS_AUTH_TYPE || 'basic'
       );
 
       // 1. Génération de l'article avec Gemini
@@ -192,7 +193,8 @@ export default {
       const wordpress = new WordPressService(
         env.WORDPRESS_URL,
         env.WORDPRESS_USERNAME,
-        env.WORDPRESS_APP_PASSWORD
+        env.WORDPRESS_APP_PASSWORD,
+        env.WORDPRESS_AUTH_TYPE || 'basic'
       );
 
       const posts = await wordpress.getPosts(20, 1);
