@@ -91,23 +91,30 @@ export default {
         topicData.keywords || []
       );
 
-      // 2. Génération de l'image à la une avec Cloudflare AI
-      console.log('Generating featured image with Cloudflare AI...');
-      const imagePrompt = `${article.title}, professional photography, high quality, modern, clean, vibrant colors, 4k resolution, blog header image`;
-      const featuredImage = await imageGen.generateImage(imagePrompt, {
-        width: 1200,
-        height: 630
-      });
-
-      // 3. Upload de l'image sur Cloudinary
-      console.log('Uploading image to Cloudinary...');
+      // 2. Génération de l'image à la une avec Cloudflare AI (optionnel)
+      let cloudinaryResult = null;
       const articleSlug = wordpress.slugify(article.title);
-      const cloudinaryResult = await cloudinary.uploadImage(featuredImage, {
-        folder: `blog-articles/${articleSlug}`,
-        filename: `${articleSlug}-featured`,
-        tags: ['blog', 'auto-generated', articleSlug],
-        altText: article.title
-      });
+
+      try {
+        console.log('Generating featured image with Cloudflare AI...');
+        const imagePrompt = `${article.title}, professional photography, high quality, modern, clean, vibrant colors, 4k resolution, blog header image`;
+        const featuredImage = await imageGen.generateImage(imagePrompt, {
+          width: 1200,
+          height: 630
+        });
+
+        // 3. Upload de l'image sur Cloudinary
+        console.log('Uploading image to Cloudinary...');
+        cloudinaryResult = await cloudinary.uploadImage(featuredImage, {
+          folder: `blog-articles/${articleSlug}`,
+          filename: `${articleSlug}-featured`,
+          tags: ['blog', 'auto-generated', articleSlug],
+          altText: article.title
+        });
+      } catch (imageError) {
+        console.warn('Image generation failed, continuing without image:', imageError.message);
+        // Continue without image
+      }
 
       // 4. Publication sur WordPress
       console.log('Publishing to WordPress...');
@@ -117,7 +124,7 @@ export default {
         metaDescription: article.metaDescription,
         keywords: topicData.keywords || [],
         categoryName: topicData.category || 'Blog',
-        featuredImageUrl: cloudinaryResult.secureUrl,
+        featuredImageUrl: cloudinaryResult ? cloudinaryResult.secureUrl : null,
         featuredImageAlt: article.title,
         status: topicData.status || 'publish'
       });
@@ -129,7 +136,7 @@ export default {
         article: {
           title: article.title,
           wordpressUrl: wpResult.url,
-          imageUrl: cloudinaryResult.secureUrl,
+          imageUrl: cloudinaryResult ? cloudinaryResult.secureUrl : null,
           publishDate: wpResult.date
         }
       };
