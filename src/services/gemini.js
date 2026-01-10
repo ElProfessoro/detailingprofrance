@@ -278,44 +278,72 @@ export class GeminiService {
 
     const prompt = `${GEMINI_PROMPT}\n\nSujet de l'article : ${topic}${keywordsList}\n\nRédige maintenant l'article complet en respectant TOUTES les consignes ci-dessus.`;
 
-    try {
-      const modelUrl = await this.getModelUrl();
-      const response = await fetch(`${modelUrl}?key=${this.apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.9,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 8192,
-          }
-        })
-      });
+    // Essayer chaque modèle jusqu'à en trouver un qui fonctionne
+    for (const modelName of this.availableModels) {
+      try {
+        console.log(`Trying model: ${modelName}`);
+        const modelUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
 
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Gemini API error: ${response.status} - ${error}`);
+        const response = await fetch(`${modelUrl}?key=${this.apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [{
+                text: prompt
+              }]
+            }],
+            generationConfig: {
+              temperature: 0.9,
+              topK: 40,
+              topP: 0.95,
+              maxOutputTokens: 8192,
+            }
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const generatedText = data.candidates[0].content.parts[0].text;
+
+          console.log(`✅ Successfully used model: ${modelName}`);
+          this.selectedModel = modelName;
+
+          // Extraction du titre et de la méta description
+          const article = this.parseArticle(generatedText);
+          return article;
+        }
+
+        // Si erreur, logger et essayer le modèle suivant
+        const errorData = await response.json();
+        console.log(`⚠️ Model ${modelName} failed: ${response.status} - ${errorData.error?.message?.substring(0, 100)}`);
+
+        // Si 429 (quota), essayer le suivant
+        if (response.status === 429) {
+          console.log(`Quota exhausted for ${modelName}, trying next model...`);
+          continue;
+        }
+
+        // Si 404 (modèle inexistant), essayer le suivant
+        if (response.status === 404) {
+          console.log(`Model ${modelName} not found, trying next model...`);
+          continue;
+        }
+
+        // Autres erreurs, essayer quand même le suivant
+        continue;
+
+      } catch (error) {
+        console.error(`Error with model ${modelName}:`, error.message);
+        // Continuer avec le modèle suivant
+        continue;
       }
-
-      const data = await response.json();
-      const generatedText = data.candidates[0].content.parts[0].text;
-
-      // Extraction du titre et de la méta description
-      const article = this.parseArticle(generatedText);
-
-      return article;
-    } catch (error) {
-      console.error('Error generating article with Gemini:', error);
-      throw error;
     }
+
+    // Si tous les modèles ont échoué
+    throw new Error('All Gemini models failed or quota exhausted. Please try again later.');
   }
 
   /**
