@@ -23,15 +23,11 @@ export class ImageGeneratorService {
     } = options;
 
     try {
-      // Utilisation du modèle Stable Diffusion XL de Cloudflare
+      // Utilisation du modèle Flux de Cloudflare (plus rapide et stable)
       const response = await this.ai.run(
-        '@cf/stabilityai/stable-diffusion-xl-base-1.0',
+        '@cf/black-forest-labs/flux-1-schnell',
         {
-          prompt: prompt,
-          num_steps: numSteps,
-          guidance: guidance,
-          width: width,
-          height: height
+          prompt: prompt
         }
       );
 
