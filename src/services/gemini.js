@@ -190,7 +190,7 @@ Rédige, relis et peaufine jusqu'à ce que chaque phrase sonne comme si elle ven
 export class GeminiService {
   constructor(apiKey) {
     this.apiKey = apiKey;
-    this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+    this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
   }
 
   /**
