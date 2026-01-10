@@ -176,8 +176,15 @@ export default {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (error) {
+      console.error('Error in handleGenerateArticle:', error);
+      console.error('Error stack:', error.stack);
+      console.error('Error type:', error.constructor.name);
+
       return new Response(JSON.stringify({
-        error: error.message
+        success: false,
+        error: error.message || String(error),
+        errorType: error.constructor.name,
+        timestamp: new Date().toISOString()
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }

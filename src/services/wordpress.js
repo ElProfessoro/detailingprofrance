@@ -208,6 +208,12 @@ export class WordPressService {
         }
       );
 
+      if (!searchResponse.ok) {
+        const errorText = await searchResponse.text();
+        console.error('Category search failed:', searchResponse.status, errorText.substring(0, 200));
+        throw new Error(`Failed to search categories: ${searchResponse.status}`);
+      }
+
       const categories = await searchResponse.json();
       if (categories.length > 0) {
         return categories[0].id;
@@ -226,10 +232,30 @@ export class WordPressService {
         })
       });
 
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text();
+        console.error('Category creation failed:', createResponse.status, errorText.substring(0, 300));
+
+        // Si rate limited (429), utiliser la catégorie par défaut au lieu de fail
+        if (createResponse.status === 429) {
+          console.warn('Rate limited, using default category (ID: 1)');
+          return 1; // Uncategorized
+        }
+
+        throw new Error(`Failed to create category: ${createResponse.status} - ${errorText.substring(0, 100)}`);
+      }
+
       const newCategory = await createResponse.json();
       return newCategory.id;
     } catch (error) {
       console.error('Error creating category:', error);
+
+      // En cas d'erreur rate limit, utiliser catégorie par défaut
+      if (error.message && error.message.includes('429')) {
+        console.warn('Rate limit detected in error, using default category');
+        return 1;
+      }
+
       throw error;
     }
   }
@@ -251,6 +277,11 @@ export class WordPressService {
         }
       );
 
+      if (!searchResponse.ok) {
+        console.warn(`Tag search failed (${searchResponse.status}), skipping tag: ${name}`);
+        return null; // Skip this tag
+      }
+
       const tags = await searchResponse.json();
       if (tags.length > 0) {
         return tags[0].id;
@@ -269,11 +300,16 @@ export class WordPressService {
         })
       });
 
+      if (!createResponse.ok) {
+        console.warn(`Tag creation failed (${createResponse.status}), skipping tag: ${name}`);
+        return null; // Skip this tag
+      }
+
       const newTag = await createResponse.json();
       return newTag.id;
     } catch (error) {
-      console.error('Error creating tag:', error);
-      throw error;
+      console.warn('Error creating tag, skipping:', error.message);
+      return null; // Skip this tag instead of failing
     }
   }
 
@@ -302,7 +338,9 @@ export class WordPressService {
       const tagIds = [];
       for (const keyword of keywords.slice(0, 10)) { // Limite à 10 tags
         const tagId = await this.getOrCreateTag(keyword);
-        tagIds.push(tagId);
+        if (tagId !== null) {
+          tagIds.push(tagId);
+        }
       }
 
       // Upload de l'image à la une si disponible

@@ -190,7 +190,79 @@ Rédige, relis et peaufine jusqu'à ce que chaque phrase sonne comme si elle ven
 export class GeminiService {
   constructor(apiKey) {
     this.apiKey = apiKey;
-    this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+    // Liste des modèles à tester par ordre de préférence (meilleurs en premier)
+    this.availableModels = [
+      'gemini-3-flash',           // Le plus récent et performant
+      'gemini-2.5-flash',         // Modèle actuel principal
+      'gemini-2.5-flash-lite',    // Version allégée
+      'gemini-2.5-flash-tts'      // Version text-to-speech (fallback)
+    ];
+    this.selectedModel = null;
+  }
+
+  /**
+   * Teste un modèle pour vérifier s'il est disponible et a du quota
+   */
+  async testModel(modelName) {
+    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${this.apiKey}`;
+
+    try {
+      const response = await fetch(testUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Test' }] }]
+        })
+      });
+
+      if (response.ok) {
+        console.log(`✅ Model ${modelName}: Available`);
+        return true;
+      }
+
+      if (response.status === 429) {
+        console.log(`⚠️ Model ${modelName}: Quota exhausted`);
+        return false;
+      }
+
+      if (response.status === 404) {
+        console.log(`❌ Model ${modelName}: Not found`);
+        return false;
+      }
+
+      return false;
+    } catch (error) {
+      console.error(`❌ Model ${modelName}: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Sélectionne automatiquement le premier modèle disponible
+   */
+  async selectAvailableModel() {
+    console.log('🔍 Testing Gemini models...');
+
+    for (const modelName of this.availableModels) {
+      const isAvailable = await this.testModel(modelName);
+      if (isAvailable) {
+        this.selectedModel = modelName;
+        console.log(`✅ Selected: ${modelName}`);
+        return modelName;
+      }
+    }
+
+    throw new Error('No Gemini model available. All quotas exhausted.');
+  }
+
+  /**
+   * Obtient l'URL du modèle à utiliser
+   */
+  async getModelUrl() {
+    if (!this.selectedModel) {
+      await this.selectAvailableModel();
+    }
+    return `https://generativelanguage.googleapis.com/v1beta/models/${this.selectedModel}:generateContent`;
   }
 
   /**
@@ -207,7 +279,8 @@ export class GeminiService {
     const prompt = `${GEMINI_PROMPT}\n\nSujet de l'article : ${topic}${keywordsList}\n\nRédige maintenant l'article complet en respectant TOUTES les consignes ci-dessus.`;
 
     try {
-      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+      const modelUrl = await this.getModelUrl();
+      const response = await fetch(`${modelUrl}?key=${this.apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
