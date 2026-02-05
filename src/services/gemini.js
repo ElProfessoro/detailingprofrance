@@ -184,6 +184,22 @@ N'utilise AUCUNE ligne ou séparateur
 
 Le texte doit être copiable-collable sans aucune modification
 
+⚠️ LIENS OBLIGATOIRES - NE PAS IGNORER ⚠️
+Tu DOIS inclure EXACTEMENT 2 liens HTML cliquables vers nos prestations dans l'article.
+
+FORMAT EXACT À UTILISER (copie ce code HTML tel quel) :
+<a href="https://www.detailingprofrance.fr/prestations/">TEXTE DU LIEN</a>
+
+EXEMPLES DE LIENS À INSÉRER :
+- <a href="https://www.detailingprofrance.fr/prestations/">nos prestations de detailing professionnel</a>
+- <a href="https://www.detailingprofrance.fr/prestations/">découvrez nos services</a>
+- <a href="https://www.detailingprofrance.fr/prestations/">confiez votre véhicule à nos experts</a>
+
+OÙ PLACER CES LIENS :
+1. Premier lien : dans le corps de l'article (après une explication technique)
+2. Deuxième lien : dans la conclusion ou la FAQ
+
+VÉRIFICATION : Avant de terminer, assure-toi que ton article contient bien 2 occurrences de : href="https://www.detailingprofrance.fr/prestations/"
 
 Rédige, relis et peaufine jusqu'à ce que chaque phrase sonne comme si elle venait d'un expert qui a déjà vécu exactement les problèmes du lecteur.`;
 
@@ -299,7 +315,7 @@ export class GeminiService {
               temperature: 0.9,
               topK: 40,
               topP: 0.95,
-              maxOutputTokens: 8192,
+              maxOutputTokens: 32768,
             }
           })
         });
@@ -354,18 +370,191 @@ export class GeminiService {
   parseArticle(text) {
     // Extraction du premier H1 ou H2 comme titre
     const titleMatch = text.match(/^#\s+(.+)$/m) || text.match(/^##\s+(.+)$/m);
-    const title = titleMatch ? titleMatch[1].trim() : 'Article généré';
+    let title = titleMatch ? titleMatch[1].trim() : 'Article généré';
+
+    // Nettoyer le titre des caractères markdown
+    title = title.replace(/\*\*/g, '').replace(/\*/g, '');
 
     // La méta description est généralement dans les premiers paragraphes
     const lines = text.split('\n').filter(line => line.trim());
     const firstParagraphs = lines.slice(0, 8).filter(line => !line.startsWith('#')).join(' ');
-    const metaDescription = firstParagraphs.substring(0, 160).trim() + '...';
+    let metaDescription = firstParagraphs.substring(0, 160).trim() + '...';
+    // Nettoyer la meta description du markdown
+    metaDescription = metaDescription.replace(/\*\*/g, '').replace(/\*/g, '');
+
+    // Convertir le Markdown en HTML
+    const htmlContent = this.markdownToHtml(text);
 
     return {
       title,
-      content: text,
+      content: htmlContent,
       metaDescription
     };
+  }
+
+  /**
+   * Convertit le Markdown en HTML pour WordPress
+   * @param {string} markdown - Texte en Markdown
+   * @returns {string} - HTML
+   */
+  markdownToHtml(markdown) {
+    let html = markdown;
+
+    // Supprimer le titre H1 du contenu (il sera utilisé comme titre WordPress)
+    html = html.replace(/^#\s+.+$/m, '');
+
+    // Convertir les titres H2 et H3
+    html = html.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
+
+    // Convertir le gras **texte** en <strong>
+    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+    // Convertir l'italique *texte* en <em>
+    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+    // Convertir les listes à puces
+    html = html.replace(/^-\s+(.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+    // Convertir les listes numérotées
+    html = html.replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+    // Convertir les séparateurs ***
+    html = html.replace(/^\*\*\*$/gm, '<hr>');
+
+    // Convertir les paragraphes (lignes non vides qui ne sont pas déjà des balises)
+    const lines = html.split('\n');
+    const processedLines = lines.map(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return '';
+      if (trimmed.startsWith('<')) return line; // Déjà une balise HTML
+      return `<p>${trimmed}</p>`;
+    });
+
+    html = processedLines.join('\n');
+
+    // Nettoyer les paragraphes vides
+    html = html.replace(/<p><\/p>/g, '');
+    html = html.replace(/<p>\s*<\/p>/g, '');
+
+    // Nettoyer les balises ul imbriquées incorrectement
+    html = html.replace(/<\/ul>\s*<ul>/g, '');
+
+    return html.trim();
+  }
+
+  /**
+   * Génère une liste de sujets d'articles uniques basés sur les articles existants
+   * @param {string[]} existingTitles - Titres des articles déjà publiés
+   * @param {string} niche - La niche/thématique du blog
+   * @param {number} count - Nombre de sujets à générer
+   * @returns {Promise<Array<{topic: string, keywords: string[], category: string}>>}
+   */
+  async generateTopics(existingTitles = [], niche = 'detailing automobile', count = 10) {
+    const existingList = existingTitles.length > 0
+      ? `\n\nArticles déjà publiés (à NE PAS répéter ou reformuler) :\n${existingTitles.map((t, i) => `${i + 1}. ${t}`).join('\n')}`
+      : '';
+
+    const prompt = `Tu es un expert SEO spécialisé dans la niche "${niche}".
+
+Génère ${count} idées d'articles de blog UNIQUES et ORIGINAUX qui n'ont PAS encore été traités.
+${existingList}
+
+Règles STRICTES :
+- Chaque sujet doit être DIFFÉRENT des articles existants
+- Pas de reformulation ou variation d'un sujet existant
+- Sujets variés : tutoriels, comparatifs, guides, erreurs à éviter, tendances, etc.
+- Optimisés pour le SEO avec des mots-clés recherchés
+- Adaptés à un public francophone
+
+Réponds UNIQUEMENT en JSON valide avec ce format exact (pas de texte avant ou après) :
+[
+  {
+    "topic": "Le titre/sujet de l'article",
+    "keywords": ["mot-clé1", "mot-clé2", "mot-clé3"],
+    "category": "Blog"
+  }
+]`;
+
+    for (const modelName of this.availableModels) {
+      try {
+        console.log(`Generating topics with model: ${modelName}`);
+        const modelUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+
+        const response = await fetch(`${modelUrl}?key=${this.apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.8,
+              maxOutputTokens: 2048,
+            }
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const text = data.candidates[0].content.parts[0].text;
+
+          // Extraire le JSON de la réponse
+          const jsonMatch = text.match(/\[[\s\S]*\]/);
+          if (jsonMatch) {
+            const topics = JSON.parse(jsonMatch[0]);
+            console.log(`✅ Generated ${topics.length} topics with ${modelName}`);
+            return topics;
+          }
+          throw new Error('Invalid JSON response from Gemini');
+        }
+
+        if (response.status === 429 || response.status === 404) {
+          continue;
+        }
+      } catch (error) {
+        console.error(`Error generating topics with ${modelName}:`, error.message);
+        continue;
+      }
+    }
+
+    throw new Error('Failed to generate topics with all Gemini models');
+  }
+
+  /**
+   * Vérifie si un titre est similaire à un titre existant (anti-doublon)
+   * @param {string} newTitle - Le nouveau titre à vérifier
+   * @param {string[]} existingTitles - Les titres existants
+   * @param {number} threshold - Seuil de similarité (0-1), 0.6 par défaut
+   * @returns {boolean} - true si doublon détecté
+   */
+  isSimilarTitle(newTitle, existingTitles, threshold = 0.6) {
+    const normalize = (str) => str
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, '')
+      .split(/\s+/)
+      .filter(word => word.length > 3);
+
+    const newWords = new Set(normalize(newTitle));
+
+    for (const existingTitle of existingTitles) {
+      const existingWords = new Set(normalize(existingTitle));
+
+      // Calculer l'intersection
+      const intersection = [...newWords].filter(word => existingWords.has(word));
+      const union = new Set([...newWords, ...existingWords]);
+
+      // Coefficient de Jaccard
+      const similarity = intersection.length / union.size;
+
+      if (similarity >= threshold) {
+        console.log(`⚠️ Doublon détecté: "${newTitle}" similaire à "${existingTitle}" (${(similarity * 100).toFixed(0)}%)`);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**

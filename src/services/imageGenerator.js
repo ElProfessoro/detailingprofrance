@@ -31,7 +31,57 @@ export class ImageGeneratorService {
         }
       );
 
-      return response;
+      console.log('Cloudflare AI response type:', typeof response);
+      console.log('Cloudflare AI response keys:', response ? Object.keys(response) : 'null');
+
+      // Flux retourne un objet avec une propriété 'image' qui est un ReadableStream ou Uint8Array
+      if (response && response.image) {
+        // Si c'est un ReadableStream, on le convertit en ArrayBuffer
+        if (response.image instanceof ReadableStream) {
+          const reader = response.image.getReader();
+          const chunks = [];
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+          }
+          // Combiner tous les chunks en un seul Uint8Array
+          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+          const result = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            result.set(chunk, offset);
+            offset += chunk.length;
+          }
+          return result.buffer;
+        }
+        // Si c'est déjà un Uint8Array ou ArrayBuffer
+        if (response.image instanceof Uint8Array) {
+          return response.image.buffer;
+        }
+        if (response.image instanceof ArrayBuffer) {
+          return response.image;
+        }
+        // Si c'est une chaîne base64
+        if (typeof response.image === 'string') {
+          const binaryString = atob(response.image);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          return bytes.buffer;
+        }
+      }
+
+      // Si la réponse est directement un ArrayBuffer ou Uint8Array
+      if (response instanceof ArrayBuffer) {
+        return response;
+      }
+      if (response instanceof Uint8Array) {
+        return response.buffer;
+      }
+
+      throw new Error('Unexpected response format from Cloudflare AI');
     } catch (error) {
       console.error('Error generating image with Cloudflare AI:', error);
       throw error;

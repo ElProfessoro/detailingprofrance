@@ -7,7 +7,7 @@
 import { GeminiService } from './services/gemini.js';
 import { ImageGeneratorService } from './services/imageGenerator.js';
 import { CloudinaryService } from './services/cloudinary.js';
-import { WordPressService } from './services/wordpress.js';
+import { WordPressPluginService } from './services/wordpress-plugin.js';
 
 export default {
   /**
@@ -35,6 +35,21 @@ export default {
     // Route pour lister les articles générés
     if (url.pathname === '/articles' && request.method === 'GET') {
       return await this.handleListArticles(env);
+    }
+
+    // Route pour tester la génération d'image
+    if (url.pathname === '/test-image' && request.method === 'GET') {
+      return await this.handleTestImage(env);
+    }
+
+    // Route pour générer automatiquement des sujets avec Gemini
+    if (url.pathname === '/generate-topics' && request.method === 'POST') {
+      return await this.handleGenerateTopics(request, env);
+    }
+
+    // Route pour renouveler automatiquement les topics quand la liste est vide
+    if (url.pathname === '/refill-topics' && request.method === 'POST') {
+      return await this.handleRefillTopics(env);
     }
 
     return new Response('Not found', { status: 404 });
@@ -65,7 +80,7 @@ export default {
   /**
    * Génère et publie un article complet
    */
-  async generateAndPublishArticle(topicData, env) {
+  async generateAndPublishArticle(topicData, env, skipDuplicateCheck = false) {
     try {
       console.log('Starting article generation for:', topicData.topic);
 
@@ -78,12 +93,23 @@ export default {
         env.CLOUDINARY_API_SECRET,
         env.CLOUDINARY_UPLOAD_PRESET
       );
-      const wordpress = new WordPressService(
+      // Utiliser le plugin personnalisé (1 seule requête) pour contourner TigerProtect
+      const wordpress = new WordPressPluginService(
         env.WORDPRESS_URL,
-        env.WORDPRESS_USERNAME,
-        env.WORDPRESS_APP_PASSWORD,
-        env.WORDPRESS_AUTH_TYPE || 'basic'
+        env.WORDPRESS_APP_PASSWORD
       );
+
+      // 0. Vérification anti-doublon (récupérer les titres existants)
+      let existingTitles = [];
+      if (!skipDuplicateCheck) {
+        try {
+          const existingPosts = await wordpress.getPosts(100, 1);
+          existingTitles = existingPosts.map(p => p.title.rendered);
+          console.log(`Loaded ${existingTitles.length} existing titles for duplicate check`);
+        } catch (e) {
+          console.warn('Could not fetch existing posts for duplicate check:', e.message);
+        }
+      }
 
       // 1. Génération de l'article avec Gemini
       console.log('Generating article with Gemini...');
@@ -91,6 +117,19 @@ export default {
         topicData.topic,
         topicData.keywords || []
       );
+
+      // 1.5 Vérification anti-doublon sur le titre généré
+      if (!skipDuplicateCheck && existingTitles.length > 0) {
+        if (gemini.isSimilarTitle(article.title, existingTitles)) {
+          console.warn('⚠️ Duplicate article detected, skipping publication');
+          return {
+            success: false,
+            skipped: true,
+            reason: 'duplicate',
+            article: { title: article.title }
+          };
+        }
+      }
 
       // 2. Génération de l'image à la une avec Cloudflare AI (optionnel)
       let cloudinaryResult = null;
@@ -117,11 +156,27 @@ export default {
         // Continue without image
       }
 
-      // 4. Publication sur WordPress
+      // 4. Préparer le contenu avec titre H1 et image intégrés
+      let fullContent = '';
+
+      // Ajouter le titre H1 en haut du contenu
+      fullContent += `<h1 class="article-title">${article.title}</h1>\n\n`;
+
+      // Ajouter l'image à la une dans le contenu si disponible
+      if (cloudinaryResult && cloudinaryResult.secureUrl) {
+        fullContent += `<figure class="featured-image">\n`;
+        fullContent += `<img src="${cloudinaryResult.secureUrl}" alt="${article.title}" class="wp-image-featured" />\n`;
+        fullContent += `</figure>\n\n`;
+      }
+
+      // Ajouter le contenu de l'article
+      fullContent += article.content;
+
+      // 5. Publication sur WordPress
       console.log('Publishing to WordPress...');
       const wpResult = await wordpress.publishCompleteArticle({
         title: article.title,
-        content: article.content,
+        content: fullContent,
         metaDescription: article.metaDescription,
         keywords: topicData.keywords || [],
         categoryName: topicData.category || 'Blog',
@@ -197,11 +252,10 @@ export default {
    */
   async handleListArticles(env) {
     try {
-      const wordpress = new WordPressService(
+      // Utiliser le plugin personnalisé (1 seule requête) pour contourner TigerProtect
+      const wordpress = new WordPressPluginService(
         env.WORDPRESS_URL,
-        env.WORDPRESS_USERNAME,
-        env.WORDPRESS_APP_PASSWORD,
-        env.WORDPRESS_AUTH_TYPE || 'basic'
+        env.WORDPRESS_APP_PASSWORD
       );
 
       const posts = await wordpress.getPosts(20, 1);
@@ -226,6 +280,230 @@ export default {
         headers: { 'Content-Type': 'application/json' }
       });
     }
+  },
+
+  /**
+   * Handler pour tester la génération d'image Cloudflare AI
+   */
+  async handleTestImage(env) {
+    try {
+      console.log('Testing Cloudflare AI image generation...');
+
+      const imageGen = new ImageGeneratorService(env.AI);
+      const cloudinary = new CloudinaryService(
+        env.CLOUDINARY_CLOUD_NAME,
+        env.CLOUDINARY_API_KEY,
+        env.CLOUDINARY_API_SECRET,
+        env.CLOUDINARY_UPLOAD_PRESET
+      );
+
+      // 1. Générer l'image avec Cloudflare AI
+      console.log('Step 1: Generating image with Cloudflare AI...');
+      const imageBuffer = await imageGen.generateImage(
+        'Professional car detailing, polishing a black luxury car, high quality photography, studio lighting',
+        { width: 1024, height: 768 }
+      );
+
+      console.log('Image generated, buffer size:', imageBuffer?.byteLength || 'unknown');
+
+      // 2. Upload sur Cloudinary
+      console.log('Step 2: Uploading to Cloudinary...');
+      const cloudinaryResult = await cloudinary.uploadImage(imageBuffer, {
+        folder: 'blog-articles/test',
+        filename: `test-image-${Date.now()}`,
+        tags: ['test', 'cloudflare-ai'],
+        altText: 'Test image from Cloudflare AI'
+      });
+
+      console.log('Upload successful:', cloudinaryResult.secureUrl);
+
+      return new Response(JSON.stringify({
+        success: true,
+        message: 'Image generated and uploaded successfully',
+        imageUrl: cloudinaryResult.secureUrl,
+        publicId: cloudinaryResult.publicId,
+        dimensions: {
+          width: cloudinaryResult.width,
+          height: cloudinaryResult.height
+        }
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+    } catch (error) {
+      console.error('Image test failed:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: error.message,
+        stack: error.stack
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  /**
+   * Handler pour générer automatiquement des sujets avec Gemini
+   */
+  async handleGenerateTopics(request, env) {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const count = body.count || 10;
+      const niche = body.niche || 'detailing automobile, préparation esthétique, entretien voiture';
+
+      const gemini = new GeminiService(env.GEMINI_API_KEY);
+      const wordpress = new WordPressPluginService(
+        env.WORDPRESS_URL,
+        env.WORDPRESS_APP_PASSWORD
+      );
+
+      // Récupérer les titres existants pour éviter les doublons
+      let existingTitles = [];
+      try {
+        const existingPosts = await wordpress.getPosts(100, 1);
+        existingTitles = existingPosts.map(p => p.title.rendered);
+      } catch (e) {
+        console.warn('Could not fetch existing posts:', e.message);
+      }
+
+      // Générer les nouveaux sujets
+      const topics = await gemini.generateTopics(existingTitles, niche, count);
+
+      return new Response(JSON.stringify({
+        success: true,
+        existingArticlesCount: existingTitles.length,
+        generatedTopics: topics.length,
+        topics
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: error.message
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  /**
+   * Handler pour renouveler automatiquement les topics sur GitHub
+   */
+  async handleRefillTopics(env) {
+    try {
+      // Vérifier combien de topics restent
+      const currentTopics = await this.getTopicsFromGitHub(env);
+
+      if (currentTopics.length >= 5) {
+        return new Response(JSON.stringify({
+          success: true,
+          message: 'Topics list is still sufficient',
+          remainingTopics: currentTopics.length
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const gemini = new GeminiService(env.GEMINI_API_KEY);
+      const wordpress = new WordPressPluginService(
+        env.WORDPRESS_URL,
+        env.WORDPRESS_APP_PASSWORD
+      );
+
+      // Récupérer les titres existants
+      let existingTitles = [];
+      try {
+        const existingPosts = await wordpress.getPosts(100, 1);
+        existingTitles = existingPosts.map(p => p.title.rendered);
+      } catch (e) {
+        console.warn('Could not fetch existing posts:', e.message);
+      }
+
+      // Ajouter aussi les topics actuels pour éviter les doublons
+      const allExisting = [...existingTitles, ...currentTopics.map(t => t.topic)];
+
+      // Générer 10 nouveaux sujets
+      const newTopics = await gemini.generateTopics(
+        allExisting,
+        'detailing automobile, préparation esthétique, entretien voiture',
+        10
+      );
+
+      // Combiner avec les topics restants
+      const allTopics = [...currentTopics, ...newTopics];
+
+      // Sauvegarder sur GitHub
+      await this.saveTopicsToGitHub(env, allTopics);
+
+      return new Response(JSON.stringify({
+        success: true,
+        previousCount: currentTopics.length,
+        addedCount: newTopics.length,
+        totalCount: allTopics.length,
+        topics: allTopics
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: error.message
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  },
+
+  /**
+   * Sauvegarde les topics sur GitHub
+   */
+  async saveTopicsToGitHub(env, topics) {
+    // Récupérer le SHA actuel du fichier
+    const response = await fetch(
+      `https://api.github.com/repos/${env.GITHUB_REPO}/contents/topics.json`,
+      {
+        headers: {
+          'Authorization': `token ${env.GITHUB_TOKEN}`,
+          'User-Agent': 'Cloudflare-Worker',
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      }
+    );
+
+    let sha = null;
+    if (response.ok) {
+      const data = await response.json();
+      sha = data.sha;
+    }
+
+    // Mettre à jour ou créer le fichier
+    const updateResponse = await fetch(
+      `https://api.github.com/repos/${env.GITHUB_REPO}/contents/topics.json`,
+      {
+        method: 'PUT',
+        headers: {
+          'Authorization': `token ${env.GITHUB_TOKEN}`,
+          'User-Agent': 'Cloudflare-Worker',
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: `Auto-refill topics (${topics.length} topics)`,
+          content: btoa(unescape(encodeURIComponent(JSON.stringify(topics, null, 2)))),
+          ...(sha && { sha })
+        })
+      }
+    );
+
+    if (!updateResponse.ok) {
+      throw new Error(`Failed to save topics: ${updateResponse.status}`);
+    }
+
+    console.log(`Saved ${topics.length} topics to GitHub`);
   },
 
   /**
