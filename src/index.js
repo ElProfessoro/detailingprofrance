@@ -62,19 +62,30 @@ export default {
   async scheduled(event, env, ctx) {
     console.log('Cron trigger activated at:', new Date(event.scheduledTime).toISOString());
 
-    // Liste de sujets prédéfinis pour la génération automatique
-    const topics = await this.getTopicsFromGitHub(env);
+    // ctx.waitUntil() empêche Cloudflare de tuer le worker avant la fin de la génération
+    ctx.waitUntil((async () => {
+      try {
+        // Liste de sujets prédéfinis pour la génération automatique
+        const topics = await this.getTopicsFromGitHub(env);
 
-    if (topics.length > 0) {
-      // Générer un article pour le premier sujet de la liste
-      const topic = topics[0];
-      await this.generateAndPublishArticle(topic, env);
+        if (topics.length > 0) {
+          // Générer un article pour le premier sujet de la liste
+          const topic = topics[0];
+          const result = await this.generateAndPublishArticle(topic, env);
+          console.log('Article generation result:', JSON.stringify(result));
 
-      // Retirer le sujet de la liste
-      await this.removeTopicFromGitHub(env, topic);
-    } else {
-      console.log('No topics available for article generation');
-    }
+          // Retirer le sujet de la liste seulement si l'article a été publié
+          if (result && result.success) {
+            await this.removeTopicFromGitHub(env, topic);
+            console.log('Topic removed from list after successful publication');
+          }
+        } else {
+          console.log('No topics available for article generation');
+        }
+      } catch (error) {
+        console.error('Scheduled job failed:', error.message, error.stack);
+      }
+    })());
   },
 
   /**
