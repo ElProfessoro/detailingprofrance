@@ -219,7 +219,7 @@ export default {
   async handleGenerateArticle(request, env) {
     try {
       const body = await request.json();
-      const { topic, keywords = [], category = 'Blog', status = 'draft' } = body;
+      const { topic, keywords = [], category = 'Blog', status = 'publish' } = body;
 
       if (!topic) {
         return new Response(JSON.stringify({
